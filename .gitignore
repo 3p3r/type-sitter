@@ -132,3 +132,10 @@ dist
 grammar.json
 grammar.js
 grammar.ts
+binding*
+build/
+index.js
+Cargo.lock
+Cargo.toml
+*.wasm
+src/

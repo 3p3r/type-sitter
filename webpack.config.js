@@ -50,10 +50,12 @@ const config = {
             json.bin = { "type-sitter": "./main.js" };
             delete json.devDependencies;
             delete json.scripts;
+            delete json.main;
             return JSON.stringify(json, null, 2);
           },
         },
         { from: "README.md", to: "README.md" },
+        { from: "types.d.ts", to: "types.d.ts" },
         { from: "LICENSE", to: "LICENSE", toType: "file" },
       ],
     }),

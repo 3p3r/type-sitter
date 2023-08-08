@@ -1,11 +1,11 @@
-import { glob } from "glob";
-import { basename, extname } from "path";
-import { program } from "commander";
+/// <reference types="./types" />
+
 import { existsSync, promises as fs } from "fs";
+import { program } from "commander";
+import { basename, extname } from "path";
 import { main as quicktypeBinary } from "quicktype";
-import { iterableFirst } from "collection-utils";
 import {
-  quicktype,
+  quicktype as quicktypeLibrary,
   InputData,
   JSONSchemaInput,
   FetchingJSONSchemaStore,
@@ -36,75 +36,31 @@ import {
   UnionType,
   transformedStringTypeTargetTypeKindsMap,
 } from "quicktype-core/dist/Type";
+import { create } from "ts-node";
+import assert from "assert";
 
 const GRAMMAR_NAME_NEEDLE = "%GRAMMAR_NAME%";
 const ROOT_GRAMMAR_NEEDLE = "%ROOT_GRAMMAR%";
 const REFS_GRAMMAR_NEEDLE = "%REFS_GRAMMAR%";
 
-const BASE_GRAMMAR = String.raw`
-/// <reference types="tree-sitter-cli/dsl.d.ts" />
-module.exports = grammar({
-  name: ${GRAMMAR_NAME_NEEDLE},
-  extras: ($) => [/\s/, $.comment],
-  conflicts: ($) => [[$.root, $.any]],
-  rules: {
-    root: ${ROOT_GRAMMAR_NEEDLE},
-    comment: ($) => token(choice(seq("//", /.*/), seq("#", /.*/), seq("/*", /[^*]*\*+([^/*][^*]*\*+)*/, "/"))),
-    null: ($) => "null",
-    bool: ($) => choice("true", "false"),
-    number: ($) => {
-      const decimal_digits = /\d+/;
-      const hex_literal = seq(choice("0x", "0X"), /[\da-fA-F]+/);
-      const signed_integer = seq(optional(choice("-", "+")), decimal_digits);
-      const exponent_part = seq(choice("e", "E"), signed_integer);
-      const binary_literal = seq(choice("0b", "0B"), /[0-1]+/);
-      const octal_literal = seq(choice("0o", "0O"), /[0-7]+/);
-      const decimal_integer_literal = seq(
-        optional(choice("-", "+")),
-        choice("0", seq(/[1-9]/, optional(decimal_digits)))
-      );
-      const decimal_literal = choice(
-        seq(decimal_integer_literal, ".", optional(decimal_digits), optional(exponent_part)),
-        seq(".", decimal_digits, optional(exponent_part)),
-        seq(decimal_integer_literal, optional(exponent_part))
-      );
-      return token(choice(hex_literal, decimal_literal, binary_literal, octal_literal));
-    },
-    integer: ($) => {
-      const decimal_digits = /\d+/;
-      const hex_literal = seq(choice("0x", "0X"), /[\da-fA-F]+/);
-      const binary_literal = seq(choice("0b", "0B"), /[0-1]+/);
-      const octal_literal = seq(choice("0o", "0O"), /[0-7]+/);
-      const decimal_integer_literal = seq(
-        optional(choice("-", "+")),
-        choice("0", seq(/[1-9]/, optional(decimal_digits)))
-      );
-      return token(choice(hex_literal, decimal_integer_literal, binary_literal, octal_literal));
-    },
-    object: ($) => seq("{", commaSep($.pair), "}"),
-    any: ($) => choice($.object, $.array, $.number, $.string, $.bool, $.null),
-    pair: ($) =>
-      seq(
-        field("key", choice($.string, $.number)),
-        ":",
-        field("value", choice($.object, $.array, $.number, $.string, $.bool, $.null))
-      ),
-    array: ($) => seq("[", commaSep(choice($.object, $.array, $.number, $.string, $.bool, $.null)), "]"),
-    string: ($) => choice(seq('"', '"'), seq('"', $.string_content, '"')),
-    string_content: ($) => repeat1(choice(token.immediate(prec(1, /[^\\"\n]+/)), $.escape_sequence)),
-    escape_sequence: ($) => token.immediate(seq("\\", /(\"|\\|\/|b|f|n|r|t|u)/)),
-    ${REFS_GRAMMAR_NEEDLE}
-  },
-});
-function commaSep1(rule) {
-  return seq(rule, repeat(seq(",", rule)));
-}
-function commaSep(rule) {
-  return optional(commaSep1(rule));
-}`;
+const $$: GrammarBuilder = {
+  name: GRAMMAR_NAME_NEEDLE,
+  root: ROOT_GRAMMAR_NEEDLE,
+  refs: REFS_GRAMMAR_NEEDLE,
+  alias: (g: string, k: string) => `alias(${g}, $.${k})`,
+  choice: (...g: string[]) => `choice(${g.join(", ")})`,
+  commaSep: (g: string) => `optional(seq(${g}, repeat(seq(",", ${g}))))`,
+  commaSep1: (g: string) => `seq(${g}, repeat(seq(",", ${g})))`,
+  field: (g: string, k: string) => `field("${k}", ${g})`,
+  optional: (...g: string[]) => `optional(${g.join(", ")})`,
+  pair: (g1: string, g2: string) => `seq(${g1}, ":", ${g2})`,
+  seq: (...g: string[]) => `seq(${g.join(", ")})`,
+  str: (s: string) => `\`${s}\``,
+  ref: (n: string) => `ref_${n}`,
+};
 
 class TreeSitterGrammarTargetLanguage extends TargetLanguage {
-  constructor() {
+  constructor(private readonly _baseGrammar: string) {
     super("Tree-Sitter Grammar", ["tree-sitter"], "js");
   }
 
@@ -128,7 +84,7 @@ class TreeSitterGrammarTargetLanguage extends TargetLanguage {
     renderContext: RenderContext,
     _untypedOptionValues: { [name: string]: any }
   ): TreeSitterGrammarRenderer {
-    return new TreeSitterGrammarRenderer(this, renderContext);
+    return new TreeSitterGrammarRenderer(this, renderContext, this._baseGrammar);
   }
 }
 
@@ -146,11 +102,13 @@ function jsonNameStyle(original: string): string {
   );
 }
 
-const EMPTY_GRAMMAR = '$ => ""';
 const namingFunction = funPrefixNamer("namer", jsonNameStyle);
 type Schema = { [name: string]: any; grammar: string };
 
 class TreeSitterGrammarRenderer extends ConvenienceRenderer {
+  constructor(targetLanguage: TargetLanguage, renderContext: RenderContext, private readonly _baseGrammar: string) {
+    super(targetLanguage, renderContext);
+  }
   protected makeNamedTypeNamer(): Namer {
     return namingFunction;
   }
@@ -171,8 +129,8 @@ class TreeSitterGrammarRenderer extends ConvenienceRenderer {
     return defined(this.names.get(this.nameForNamedType(t)));
   }
 
-  private makeOneOf(types: ReadonlySet<Type>): Schema {
-    const first = iterableFirst(types);
+  private makeUnionOf(types: ReadonlySet<Type>): Schema {
+    const first = [...types][0];
     if (first === undefined) {
       return panic("Must have at least one type for oneOf");
     }
@@ -183,12 +141,12 @@ class TreeSitterGrammarRenderer extends ConvenienceRenderer {
     const anyOf = Array.from(types).map((t: Type) => this.schemaForType(t));
     return {
       anyOf,
-      grammar: anyOf.length === 1 ? `"${anyOf[0]}"` : `choice(${anyOf.map((s) => s.grammar).join(", ")})`,
+      grammar: anyOf.length === 1 ? anyOf[0].grammar : $$.choice(...anyOf.map((s) => s.grammar)),
     };
   }
 
   private makeRef(t: Type): Schema {
-    return { $ref: `#/definitions/${this.nameForType(t)}`, grammar: `$.ref_${this.nameForType(t)}` };
+    return { $ref: `#/definitions/${this.nameForType(t)}`, grammar: `$.${$$.ref(this.nameForType(t))}` };
   }
 
   private addAttributesToSchema(t: Type, schema: Schema): void {
@@ -242,27 +200,27 @@ class TreeSitterGrammarRenderer extends ConvenienceRenderer {
     return {
       type: "array",
       items: schema,
-      grammar: `seq("[", commaSep(${schema.grammar}), "]")`,
+      grammar: $$.seq($$.str("["), $$.commaSep(schema.grammar), $$.str("]")),
     };
   }
 
   private definitionForObject(o: ObjectType, title: string | undefined): Schema {
     let properties: Schema | undefined;
     let required: string[] | undefined;
-    let grammar = EMPTY_GRAMMAR;
     let pairs = new Array<string>();
     if (o.getProperties().size === 0) {
       properties = undefined;
       required = undefined;
     } else {
-      const props: Schema = { grammar };
+      const props: Schema = { grammar: "" };
       const req: string[] = [];
       for (const [name, p] of o.getProperties()) {
         const prop = this.schemaForType(p.type);
+        const _pair = $$.pair($$.str(`"${name}"`), prop.grammar);
         if (p.isOptional) {
-          pairs.push(`optional(seq('"${name}"', ":", ${prop.grammar}))`);
+          pairs.push($$.optional($$.field(_pair, name)));
         } else {
-          pairs.push(`'"${name}"', ":", ${prop.grammar}`);
+          pairs.push($$.field(_pair, name));
         }
         if (prop.description === undefined) {
           addDescriptionToSchema(prop, this.descriptionForClassProperty(o, name));
@@ -278,12 +236,17 @@ class TreeSitterGrammarRenderer extends ConvenienceRenderer {
     const additional = o.getAdditionalProperties();
     const additionalProperties = additional !== undefined ? this.schemaForType(additional) : false;
     if (additionalProperties !== false) {
-      pairs.push(`$.string, ":", ${additionalProperties.grammar}`);
+      pairs.push($$.pair("$.string", additionalProperties.grammar));
     }
-    grammar = pairs.length > 0 ? `seq("{", commaSep(choice(${pairs.join(", ")})), "}")` : "$.object";
+    const grammar =
+      pairs.length === 1
+        ? $$.seq($$.str("{"), $$.commaSep1($$.seq(pairs[0])), $$.str("}"))
+        : pairs.length > 0
+        ? $$.seq($$.str("{"), $$.commaSep($$.choice(...pairs)), $$.str("}"))
+        : "$.object";
     const schema = {
       type: "object",
-      grammar: required?.length ? grammar : `choice(seq("{", "}"), ${grammar})`,
+      grammar: required?.length ? grammar : $$.choice($$.seq($$.str("{"), $$.str("}")), grammar),
       additionalProperties,
       properties,
       required,
@@ -294,12 +257,12 @@ class TreeSitterGrammarRenderer extends ConvenienceRenderer {
   }
 
   private definitionForUnion(u: UnionType, title?: string): Schema {
-    const oneOf = this.makeOneOf(u.sortedMembers);
+    const union = this.makeUnionOf(u.sortedMembers);
     if (title !== undefined) {
-      oneOf.title = title;
+      union.title = title;
     }
-    this.addAttributesToSchema(u, oneOf);
-    return oneOf;
+    this.addAttributesToSchema(u, union);
+    return union;
   }
 
   private definitionForEnum(e: EnumType, title: string): Schema {
@@ -308,7 +271,7 @@ class TreeSitterGrammarRenderer extends ConvenienceRenderer {
       type: "string",
       enum: cases,
       title,
-      grammar: cases.length === 1 ? `'"${cases[0]}"'` : `choice(${cases.map((c) => `'"${c}"'`).join(", ")})`,
+      grammar: cases.length === 1 ? $$.str(`"${cases[0]}"`) : $$.choice(...cases.map((c) => $$.str(`"${c}"`))),
     };
     this.addAttributesToSchema(e, schema);
     return schema;
@@ -333,10 +296,10 @@ class TreeSitterGrammarRenderer extends ConvenienceRenderer {
     const refs = Object.entries(definitions)
       .filter(([name]) => name !== ROOT_NAME)
       .map(([name, schema]) => {
-        return `ref_${name}: ($) => ${schema.grammar}`;
+        return `${$$.ref(name)}: ($) => ${schema.grammar}`;
       })
       .join(",\n    ");
-    const g = BASE_GRAMMAR.replace(ROOT_GRAMMAR_NEEDLE, `($) => ${grammar}`).replace(REFS_GRAMMAR_NEEDLE, refs);
+    const g = this._baseGrammar.replace(ROOT_GRAMMAR_NEEDLE, `($) => ${grammar}`).replace(REFS_GRAMMAR_NEEDLE, refs);
     this.emitLine(g);
   }
 }
@@ -360,15 +323,21 @@ program
   .name("type-sitter")
   .version(getVersion())
   .description("Generate tree-sitter grammars from TypeScript types")
-  .option("-i, --input <files>", "Input file(s) or glob pattern", INPUT_FILE)
-  .option("-n, --name <name>", "Grammar name")
+  .option("-i, --input <file>", "Input grammar file", INPUT_FILE)
+  .option("-n, --name <name> (default: input basename)", "Grammar name")
   .option("-o, --output <file>", "Output file", OUTPUT_GRAMMAR)
   .option("-s, --schema <file>", "Output schema file", OUTPUT_SCHEMA)
   .option("-r, --root <name>", "Root type name", ROOT_NAME)
   .action(async (options) => {
-    const inputFilter = options.input || INPUT_FILE;
-    const inputExists = existsSync(inputFilter);
-    const inputFiles = inputExists ? [inputFilter] : await glob(inputFilter, { absolute: true });
+    const inputFile = (options.input as string) || INPUT_FILE;
+    assert(existsSync(inputFile), `Input file '${inputFile}' does not exist`);
+    const transpiler = create({ transpileOnly: true, compilerOptions: { skipLibCheck: true } });
+    const transpiled = transpiler.compile(await fs.readFile(inputFile, "utf8"), inputFile);
+    const baseGrammar = eval(transpiled);
+    assert(typeof baseGrammar === "function", "'baseGrammar' must be a function");
+    const _baseGrammar = baseGrammar($$);
+    assert(typeof _baseGrammar === "string", "'baseGrammar' must return a string");
+    const inputFiles = [inputFile];
     await quicktypeBinary({ out: OUTPUT_SCHEMA, src: inputFiles, srcLang: "typescript", lang: "schema" });
     const jsonSchema = JSON.parse(await fs.readFile(OUTPUT_SCHEMA, "utf8"));
     Object.assign(jsonSchema, { $ref: `#/definitions/${ROOT_NAME}` });
@@ -376,12 +345,14 @@ program
     await schemaInput.addSource({ name: ROOT_NAME, schema: JSON.stringify(jsonSchema) });
     const inputData = new InputData();
     inputData.addInput(schemaInput);
-    const result = await quicktype({ inputData, lang: new TreeSitterGrammarTargetLanguage(), indentation: "  " });
+    const result = await quicktypeLibrary({
+      lang: new TreeSitterGrammarTargetLanguage(_baseGrammar),
+      indentation: "  ",
+      inputData,
+    });
     const name =
       options.name ||
-      (inputExists
-        ? basename(inputFiles[0], extname(inputFiles[0]))
-        : basename(options.output, extname(options.output))) ||
+      basename(inputFiles[0], extname(inputFiles[0])) ||
       basename(OUTPUT_GRAMMAR, extname(OUTPUT_GRAMMAR));
     const output = result.lines.join("\n").replace(GRAMMAR_NAME_NEEDLE, `"${name}"`);
     await fs.writeFile(OUTPUT_GRAMMAR, output);

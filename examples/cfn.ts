@@ -137,17 +137,6 @@ module.exports = grammar({
       );
       return token(choice(hex_literal, decimal_literal, binary_literal, octal_literal));
     },
-    integer: ($) => {
-      const decimal_digits = /\d+/;
-      const hex_literal = seq(choice("0x", "0X"), /[\da-fA-F]+/);
-      const binary_literal = seq(choice("0b", "0B"), /[0-1]+/);
-      const octal_literal = seq(choice("0o", "0O"), /[0-7]+/);
-      const decimal_integer_literal = seq(
-        optional(choice("-", "+")),
-        choice("0", seq(/[1-9]/, optional(decimal_digits)))
-      );
-      return token(choice(hex_literal, decimal_integer_literal, binary_literal, octal_literal));
-    },
     object: ($) => seq("{", ${$$.commaSep("$.pair")}, "}"),
     any: ($) => prec.right(choice($.object, $.array, $.number, $.string, $.bool, $.null)),
     pair: ($) =>

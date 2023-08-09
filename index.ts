@@ -53,7 +53,7 @@ const $$: GrammarBuilder = {
   commaSep1: (g: string) => `seq(${g}, repeat(seq(",", ${g})))`,
   field: (g: string, k: string) => `field("${k}", ${g})`,
   optional: (...g: string[]) => `optional(${g.join(", ")})`,
-  pair: (g1: string, g2: string) => `seq(${g1}, ":", ${g2})`,
+  pair: (g1: string, g2: string) => `seq(${$$.field(g1, "key")}, ":", ${$$.field(g2, "value")})`,
   seq: (...g: string[]) => `seq(${g.join(", ")})`,
   str: (s: string) => `\`${s}\``,
   ref: (n: string) => `ref_${n}`,
@@ -165,7 +165,7 @@ class TreeSitterGrammarRenderer extends ConvenienceRenderer {
       (_anyType) => ({ grammar: "$.any" }),
       (_nullType) => ({ type: "null", grammar: "$.null" }),
       (_boolType) => ({ type: "boolean", grammar: "$.bool" }),
-      (_integerType) => ({ type: "integer", grammar: "$.integer" }),
+      (_integerType) => ({ type: "integer", grammar: "$.number" }),
       (_doubleType) => ({ type: "number", grammar: "$.number" }),
       (_stringType) => ({ type: "string", grammar: "$.string" }),
       (arrayType) => this.definitionForArray(arrayType),
@@ -323,30 +323,28 @@ program
   .name("type-sitter")
   .version(getVersion())
   .description("Generate tree-sitter grammars from TypeScript types")
-  .option("-i, --input <file>", "Input grammar file", INPUT_FILE)
-  .option("-n, --name <name> (default: input basename)", "Grammar name")
-  .option("-o, --output <file>", "Output file", OUTPUT_GRAMMAR)
-  .option("-s, --schema <file>", "Output schema file", OUTPUT_SCHEMA)
+  .option("-i, --input <file>", "TypeSitter grammar input", INPUT_FILE)
+  .option("-o, --output <file>", "CST grammar output", OUTPUT_GRAMMAR)
+  .option("-s, --schema <file>", "CST schema output", OUTPUT_SCHEMA)
   .option("-r, --root <name>", "Root type name", ROOT_NAME)
   .action(async (options) => {
     const inputFile = (options.input as string) || INPUT_FILE;
     assert(existsSync(inputFile), `Input file '${inputFile}' does not exist`);
+    const inputContent = await fs.readFile(inputFile, "utf8");
     const transpiler = create({ transpileOnly: true, compilerOptions: { skipLibCheck: true } });
-    const transpiled = transpiler.compile(await fs.readFile(inputFile, "utf8"), inputFile);
-    const baseGrammar = eval(transpiled);
-    assert(typeof baseGrammar === "function", "'baseGrammar' must be a function");
-    const _baseGrammar = baseGrammar($$);
-    assert(typeof _baseGrammar === "string", "'baseGrammar' must return a string");
+    const baseGrammar = eval(transpiler.compile(inputContent, inputFile))($$);
     const inputFiles = [inputFile];
-    await quicktypeBinary({ out: OUTPUT_SCHEMA, src: inputFiles, srcLang: "typescript", lang: "schema" });
-    const jsonSchema = JSON.parse(await fs.readFile(OUTPUT_SCHEMA, "utf8"));
-    Object.assign(jsonSchema, { $ref: `#/definitions/${ROOT_NAME}` });
+    const outputSchema = (options.schema as string) || OUTPUT_SCHEMA;
+    await quicktypeBinary({ out: outputSchema, src: inputFiles, srcLang: "typescript", lang: "schema" });
+    const jsonSchema = JSON.parse(await fs.readFile(outputSchema, "utf8"));
+    const rootName = (options.root as string) || ROOT_NAME;
+    Object.assign(jsonSchema, { $ref: `#/definitions/${rootName}` });
     const schemaInput = new JSONSchemaInput(new FetchingJSONSchemaStore());
-    await schemaInput.addSource({ name: ROOT_NAME, schema: JSON.stringify(jsonSchema) });
+    await schemaInput.addSource({ name: rootName, schema: JSON.stringify(jsonSchema) });
     const inputData = new InputData();
     inputData.addInput(schemaInput);
     const result = await quicktypeLibrary({
-      lang: new TreeSitterGrammarTargetLanguage(_baseGrammar),
+      lang: new TreeSitterGrammarTargetLanguage(baseGrammar),
       indentation: "  ",
       inputData,
     });
@@ -355,6 +353,7 @@ program
       basename(inputFiles[0], extname(inputFiles[0])) ||
       basename(OUTPUT_GRAMMAR, extname(OUTPUT_GRAMMAR));
     const output = result.lines.join("\n").replace(GRAMMAR_NAME_NEEDLE, `"${name}"`);
-    await fs.writeFile(OUTPUT_GRAMMAR, output);
+    const outputFile = (options.output as string) || OUTPUT_GRAMMAR;
+    await fs.writeFile(outputFile, output, "utf8");
   })
   .parse();

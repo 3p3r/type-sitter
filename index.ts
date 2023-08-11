@@ -43,20 +43,22 @@ const GRAMMAR_NAME_NEEDLE = "%GRAMMAR_NAME%";
 const ROOT_GRAMMAR_NEEDLE = "%ROOT_GRAMMAR%";
 const REFS_GRAMMAR_NEEDLE = "%REFS_GRAMMAR%";
 
+const sanitizeName = (name: string) => name.replace(/[^a-zA-Z0-9_]+/g, "_");
+
 const $$: GrammarBuilder = {
   name: GRAMMAR_NAME_NEEDLE,
   root: ROOT_GRAMMAR_NEEDLE,
   refs: REFS_GRAMMAR_NEEDLE,
-  alias: (g: string, k: string) => `alias(${g}, $.${k})`,
+  alias: (g: string, k: string) => `alias(${g}, $.${sanitizeName(k)})`,
   choice: (...g: string[]) => `choice(${g.join(", ")})`,
   commaSep: (g: string) => `optional(seq(${g}, repeat(seq(",", ${g}))))`,
   commaSep1: (g: string) => `seq(${g}, repeat(seq(",", ${g})))`,
-  field: (g: string, k: string) => `field("${k}", ${g})`,
+  field: (g: string, k: string) => `field("${sanitizeName(k)}", ${g})`,
   optional: (...g: string[]) => `optional(${g.join(", ")})`,
   pair: (g1: string, g2: string) => `seq(${$$.field(g1, "key")}, ":", ${$$.field(g2, "value")})`,
   seq: (...g: string[]) => `seq(${g.join(", ")})`,
   str: (s: string) => `\`${s}\``,
-  ref: (n: string) => `ref_${n}`,
+  ref: (n: string) => `ref_${sanitizeName(n)}`,
 };
 
 class TreeSitterGrammarTargetLanguage extends TargetLanguage {

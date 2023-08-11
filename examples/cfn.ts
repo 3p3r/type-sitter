@@ -8,7 +8,103 @@ export interface Grammar {
   readonly Parameters?: { [key: string]: Parameter };
   readonly Resources: { [key: string]: Resource };
   readonly Mappings?: { [key: string]: Mapping };
+  readonly Conditions?: { [key: string]: Condition };
+  readonly Transform?: Transform;
+  readonly Outputs?: { [key: string]: Output };
+  readonly Hooks?: { [key: string]: object };
+  readonly Rules?: { [key: string]: object };
 }
+
+interface Output {
+  readonly Description?: string;
+  readonly Value: Expression;
+  readonly Export?: {
+    Name: Expression;
+  };
+}
+
+type Transform =
+  | {
+      Name?: "AWS::Include";
+      Parameters?: {
+        Location?: string;
+      };
+    }
+  | ("AWS::CodeDeployBlueGreen" | "AWS::CodeStar" | "AWS::SecretsManager-2020-07-23" | "AWS::Serverless-2016-10-31");
+
+type Condition = string | FnAnd | FnEquals | FnNot | FnOr | FnFindInMap | FnIf | FnRef;
+
+interface FnIf {
+  readonly "Fn::If": [string, Expression, Expression];
+}
+interface FnAnd {
+  readonly "Fn::And": Condition[];
+}
+interface FnEquals {
+  readonly "Fn::Equals": [Condition, Condition];
+}
+interface FnNot {
+  readonly "Fn::Not": [Condition];
+}
+interface FnOr {
+  readonly "Fn::Or": Condition[];
+}
+
+type Expression =
+  | string
+  | FnBase64
+  | FnCidr
+  | FnFindInMap
+  | FnGetAtt
+  | FnGetAZs
+  | FnImportValue
+  | FnJoin
+  | FnRef
+  | FnSelect
+  | FnSplit
+  | FnSub;
+
+interface FnBase64 {
+  readonly "Fn::Base64": Expression;
+}
+interface FnCidr {
+  readonly "Fn::Cidr": [Expression, number, number];
+}
+interface FnFindInMap {
+  readonly "Fn::FindInMap": [string, Expression, Expression];
+}
+interface FnGetAtt {
+  readonly "Fn::GetAtt": [string, Expression];
+}
+interface FnGetAZs {
+  readonly "Fn::GetAZs": Expression;
+}
+interface FnImportValue {
+  readonly "Fn::ImportValue": Expression;
+}
+interface FnJoin {
+  readonly "Fn::Join": [string, Expression[]];
+}
+interface FnRefShort {
+  readonly Ref: Expression;
+}
+interface FnRefLong {
+  readonly Ref: Expression;
+}
+type FnRef = FnRefShort | FnRefLong;
+interface FnSelect {
+  readonly "Fn::Select": [number, Expression[]];
+}
+interface FnSplit {
+  readonly "Fn::Split": [string, Expression];
+}
+interface FnSubShort {
+  readonly "Fn::Sub": [Expression];
+}
+interface FnSubLong {
+  readonly "Fn::Sub": [string, { [key: string]: Expression } | Expression[]];
+}
+type FnSub = FnSubShort | FnSubLong;
 
 interface Mapping {
   [k: string]: boolean | number | string;

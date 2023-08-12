@@ -211,8 +211,10 @@ export const baseGrammar = ($$: GrammarBuilder) => String.raw`
 module.exports = grammar({
   name: ${$$.name},
   extras: ($) => [/\s/, $.comment],
+  supertypes: ($) => [$.any],
   rules: {
-    root: ${$$.root},
+    document: ${$$.root},
+    ...{${$$.refs}},
     comment: ($) => token(choice(seq("//", /.*/), seq("#", /.*/), seq("/*", /[^*]*\*+([^/*][^*]*\*+)*/, "/"))),
     null: ($) => "null",
     true: ($) => "true",
@@ -236,19 +238,14 @@ module.exports = grammar({
       );
       return token(choice(hex_literal, decimal_literal, binary_literal, octal_literal));
     },
-    object: ($) => seq("{", ${$$.commaSep("$.pair")}, "}"),
-    any: ($) => prec.right(choice($.object, $.array, $.number, $.string, $.bool, $.null)),
-    pair: ($) =>
-      seq(
-        field("key", choice($.string, $.number)),
-        ":",
-        field("value", $.any),
-      ),
+    object: ($) => seq("{", ${$$.commaSep("$._pair")}, "}"),
+    any: ($) => prec.right($._any),
     array: ($) => seq("[", ${$$.commaSep("$.any")}, "]"),
-    string: ($) => choice(seq('"', '"'), seq('"', $.string_content, '"')),
-    string_content: ($) => repeat1(choice(token.immediate(prec(1, /[^\\"\n]+/)), $.escape_sequence)),
-    escape_sequence: ($) => token.immediate(seq("\\", /(\"|\\|\/|b|f|n|r|t|u)/)),
-    ${$$.refs}
+    string: ($) => choice(seq('"', '"'), seq('"', $._string_content, '"')),
+    _any: ($) => choice($.object, $.array, $.number, $.string, $.bool, $.null),
+    _pair: ($) => seq(choice($.string, $.number), ":", $.any),
+    _string_content: ($) => repeat1(choice(token.immediate(prec(1, /[^\\"\n]+/)), $._escape_sequence)),
+    _escape_sequence: ($) => token.immediate(seq("\\", /(\"|\\|\/|b|f|n|r|t|u)/)),
   },
 });
 `;

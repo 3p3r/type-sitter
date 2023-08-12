@@ -8,7 +8,7 @@ export interface Grammar {
   readonly Parameters?: { [key: string]: Parameter };
   readonly Resources: { [key: string]: Resource };
   readonly Mappings?: { [key: string]: Mapping };
-  readonly Conditions?: { [key: string]: Condition };
+  readonly Conditions?: { [key: string]: object };
   readonly Transform?: Transform;
   readonly Outputs?: { [key: string]: Output };
   readonly Hooks?: { [key: string]: object };
@@ -23,6 +23,12 @@ interface Output {
   };
 }
 
+interface Mapping {
+  readonly [key: string]: {
+    readonly [key: string]: any;
+  };
+}
+
 type Transform =
   | {
       Name?: "AWS::Include";
@@ -32,26 +38,10 @@ type Transform =
     }
   | ("AWS::CodeDeployBlueGreen" | "AWS::CodeStar" | "AWS::SecretsManager-2020-07-23" | "AWS::Serverless-2016-10-31");
 
-type Condition = string | FnAnd | FnEquals | FnNot | FnOr | FnFindInMap | FnIf | FnRef;
-
-interface FnIf {
-  readonly "Fn::If": [string, Expression, Expression];
-}
-interface FnAnd {
-  readonly "Fn::And": Condition[];
-}
-interface FnEquals {
-  readonly "Fn::Equals": [Condition, Condition];
-}
-interface FnNot {
-  readonly "Fn::Not": [Condition];
-}
-interface FnOr {
-  readonly "Fn::Or": Condition[];
-}
-
-type Expression =
-  | string
+type Expression = Condition | Intrinsic;
+type Condition = FnEquals | FnAnd | FnOr | FnNot | FnIf;
+type Intrinsic =
+  | FnRef
   | FnBase64
   | FnCidr
   | FnFindInMap
@@ -59,55 +49,148 @@ type Expression =
   | FnGetAZs
   | FnImportValue
   | FnJoin
-  | FnRef
   | FnSelect
   | FnSplit
-  | FnSub;
-
-interface FnBase64 {
-  readonly "Fn::Base64": Expression;
-}
-interface FnCidr {
-  readonly "Fn::Cidr": [Expression, number, number];
-}
-interface FnFindInMap {
-  readonly "Fn::FindInMap": [string, Expression, Expression];
-}
-interface FnGetAtt {
-  readonly "Fn::GetAtt": [string, Expression];
-}
-interface FnGetAZs {
-  readonly "Fn::GetAZs": Expression;
-}
-interface FnImportValue {
-  readonly "Fn::ImportValue": Expression;
-}
-interface FnJoin {
-  readonly "Fn::Join": [string, Expression[]];
-}
+  | FnSubShort
+  | FnSubLong
+  | FnTransform
+  | FnLength
+  | FnToJsonString;
+type FnRef = FnRefShort | FnRefLong;
+type FnRefInput = string | FnBase64 | FnFindInMap | FnIf | FnJoin | FnSub | FnToJsonString | FnRef;
 interface FnRefShort {
-  readonly Ref: Expression;
+  Ref: FnRefInput;
 }
 interface FnRefLong {
-  readonly Ref: Expression;
+  "Fn::Ref": FnRefInput;
 }
-type FnRef = FnRefShort | FnRefLong;
+type FnBase64Input = string | Expression;
+interface FnBase64 {
+  "Fn::Base64": FnBase64Input;
+}
+type FnCidrInput = string | FnSelect | FnRef;
+interface FnCidr {
+  "Fn::Cidr": [FnCidrInput, number | FnCidrInput, number | FnCidrInput];
+}
+type FnFindInMapInput = string | FnSelect | FnRef;
+interface FnFindInMap {
+  "Fn::FindInMap": [FnFindInMapInput, FnFindInMapInput, FnFindInMapInput];
+}
+type FnGetAttInput = string | FnBase64 | FnFindInMap | FnIf | FnJoin | FnSub | FnToJsonString | FnRef;
+interface FnGetAtt {
+  "Fn::GetAtt": [FnGetAttInput, FnGetAttInput];
+}
+type FnGetAZsInput = string | FnRef;
+interface FnGetAZs {
+  "Fn::GetAZs": FnGetAZsInput;
+}
+type FnImportValueInput = string | FnBase64 | FnFindInMap | FnIf | FnJoin | FnSelect | FnSplit | FnSub | FnRef;
+interface FnImportValue {
+  "Fn::ImportValue": FnImportValueInput;
+}
+type FnJoinInput =
+  | string
+  | FnBase64
+  | FnFindInMap
+  | FnGetAtt
+  | FnGetAZs
+  | FnIf
+  | FnImportValue
+  | FnJoin
+  | FnSplit
+  | FnSelect
+  | FnSub
+  | FnTransform
+  | FnRef;
+interface FnJoin {
+  "Fn::Join": [string, FnJoinInput[]];
+}
+type FnLengthInput =
+  | any[]
+  | Condition
+  | FnBase64
+  | FnFindInMap
+  | FnJoin
+  | FnLength
+  | FnSelect
+  | FnSplit
+  | FnSub
+  | FnToJsonString
+  | FnRef;
+interface FnLength {
+  "Fn::Length": FnLengthInput;
+}
+type FnSelectInput = FnFindInMap | FnGetAtt | FnGetAZs | FnIf | FnSplit | FnRef;
 interface FnSelect {
-  readonly "Fn::Select": [number, Expression[]];
+  "Fn::Select": [number | string | FnRef | FnFindInMap, FnSelectInput[]];
 }
+type FnSplitInput =
+  | string
+  | FnBase64
+  | FnFindInMap
+  | FnGetAtt
+  | FnGetAZs
+  | FnIf
+  | FnImportValue
+  | FnJoin
+  | FnSelect
+  | FnSub
+  | FnRef;
 interface FnSplit {
-  readonly "Fn::Split": [string, Expression];
-}
-interface FnSubShort {
-  readonly "Fn::Sub": [Expression];
-}
-interface FnSubLong {
-  readonly "Fn::Sub": [string, { [key: string]: Expression } | Expression[]];
+  "Fn::Split": [string, FnSplitInput];
 }
 type FnSub = FnSubShort | FnSubLong;
-
-interface Mapping {
-  [k: string]: boolean | number | string;
+interface FnSubShort {
+  "Fn::Sub": string;
+}
+type FnSubLongInput = FnBase64 | FnFindInMap | FnGetAtt | FnGetAZs | FnIf | FnImportValue | FnJoin | FnSelect | FnRef;
+interface FnSubLong {
+  "Fn::Sub": [string, { [key: string]: FnSubLongInput }];
+}
+type FnToJsonStringInput =
+  | any
+  | FnBase64
+  | FnFindInMap
+  | FnGetAtt
+  | FnGetAZs
+  | FnIf
+  | FnImportValue
+  | FnJoin
+  | FnLength
+  | FnSelect
+  | FnSplit
+  | FnSub
+  | FnToJsonString
+  | FnRef;
+interface FnToJsonString {
+  "Fn::ToJsonString": FnToJsonStringInput;
+}
+interface FnTransform {
+  "Fn::Transform": {
+    Name: string;
+    Parameters: { [key: string]: any };
+  };
+}
+interface FnCondition {
+  Condition: string;
+}
+type FnAndInput = FnCondition | Condition;
+interface FnAnd {
+  "Fn::And": FnAndInput[];
+}
+interface FnEquals {
+  "Fn::Equals": [any, any];
+}
+type FnOrInput = FnCondition | Condition;
+interface FnOr {
+  "Fn::Or": FnOrInput[];
+}
+type FnNotInput = FnCondition | Condition;
+interface FnNot {
+  "Fn::Not": FnNotInput;
+}
+interface FnIf {
+  "Fn::If": [string, any, any];
 }
 
 interface Resource {
@@ -115,9 +198,10 @@ interface Resource {
   readonly Properties?: object;
   readonly DeletionPolicy?: "Delete" | "Retain" | "Snapshot";
   readonly UpdateReplacePolicy?: "Delete" | "Retain" | "Snapshot";
-  readonly DependsOn?: string[];
+  readonly DependsOn?: string | string[];
   readonly CreationPolicy?: object;
   readonly Metadata?: object;
+  readonly Condition?: string;
 }
 
 interface CommonParams {
@@ -208,8 +292,10 @@ export const baseGrammar = ($$: GrammarBuilder) => String.raw`
 module.exports = grammar({
   name: ${$$.name},
   extras: ($) => [/\s/, $.comment],
+  supertypes: ($) => [$.any],
   rules: {
-    root: ${$$.root},
+    document: ${$$.root},
+    ...{${$$.refs}},
     comment: ($) => token(choice(seq("//", /.*/), seq("#", /.*/), seq("/*", /[^*]*\*+([^/*][^*]*\*+)*/, "/"))),
     null: ($) => "null",
     true: ($) => "true",
@@ -233,19 +319,14 @@ module.exports = grammar({
       );
       return token(choice(hex_literal, decimal_literal, binary_literal, octal_literal));
     },
-    object: ($) => seq("{", ${$$.commaSep("$.pair")}, "}"),
-    any: ($) => prec.right(choice($.object, $.array, $.number, $.string, $.bool, $.null)),
-    pair: ($) =>
-      seq(
-        field("key", choice($.string, $.number)),
-        ":",
-        field("value", $.any),
-      ),
+    object: ($) => seq("{", ${$$.commaSep("$._pair")}, "}"),
+    any: ($) => prec.right($._any),
     array: ($) => seq("[", ${$$.commaSep("$.any")}, "]"),
-    string: ($) => choice(seq('"', '"'), seq('"', $.string_content, '"')),
-    string_content: ($) => repeat1(choice(token.immediate(prec(1, /[^\\"\n]+/)), $.escape_sequence)),
-    escape_sequence: ($) => token.immediate(seq("\\", /(\"|\\|\/|b|f|n|r|t|u)/)),
-    ${$$.refs}
+    string: ($) => choice(seq('"', '"'), seq('"', $._string_content, '"')),
+    _any: ($) => choice($.object, $.array, $.number, $.string, $.bool, $.null),
+    _pair: ($) => seq(choice($.string, $.number), ":", $.any),
+    _string_content: ($) => repeat1(choice(token.immediate(prec(1, /[^\\"\n]+/)), $._escape_sequence)),
+    _escape_sequence: ($) => token.immediate(seq("\\", /(\"|\\|\/|b|f|n|r|t|u)/)),
   },
 });
 `;
